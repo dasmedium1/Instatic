@@ -1,0 +1,56 @@
+# compose.traefik.yml
+# Override for compose.prod.yml that puts an existing Traefik reverse proxy in
+# front of the CMS instead of the bundled Caddy service (compose.tls.yml).
+#
+# Stack-on-top usage:
+#
+#   docker compose -f compose.prod.yml -f compose.sqlite.yml -f compose.traefik.yml up -d        # SQLite
+#   docker compose -f compose.prod.yml -f compose.traefik.yml up -d                              # Postgres
+#
+# What this does:
+#   - Removes the `app` host port mapping so the only public surface is Traefik.
+#   - Attaches `app` to the external `traefik_web` network Traefik is on.
+#   - Adds Traefik labels so Traefik routes `${DOMAIN}` → app:3001 with TLS from
+#     the `letsencrypt` cert resolver on the `websecure` entrypoint.
+#   - Sets PUBLIC_ORIGIN to the real public origin so the CSRF/Origin check
+#     (HTTP API and the co-editing WebSocket) matches the public HTTPS URL even
+#     though Traefik hands the container plain HTTP.
+#   - Sets TRUSTED_PROXY_CIDRS to the Docker bridge range so audit logs and
+#     rate-limit keys use the real client IP from Traefik's X-Forwarded-For.
+#     This is client-IP attribution only, NOT CSRF.
+#
+# Prerequisites:
+#   - Traefik already running with a `websecure` entrypoint, a `letsencrypt`
+#     cert resolver, and an external Docker network named `traefik_web`.
+#   - DNS A/AAAA records for ${DOMAIN} already pointing at this server.
+#   - Ports 80/443 reachable (Traefik handles the ACME challenge).
+#   - DOMAIN set in .env (required — the deploy workflow writes it from the
+#     GitHub `DOMAIN` variable; no fallback domain is baked in).
+
+services:
+  app:
+    # Traefik is the only public surface — reset the host port mapping inherited
+    # from compose.prod.yml.
+    ports: !reset []
+    networks:
+      - default
+      - traefik
+    environment:
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://${DOMAIN}}
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
+    labels:
+      traefik.enable: "true"
+      # The app joins both the compose `default` network and the external Traefik
+      # network; tell Traefik which network to reach the container on.
+      traefik.docker.network: traefik_web
+      traefik.http.routers.instatic.rule: "Host(`${DOMAIN:?Set DOMAIN in .env, e.g. cms.example.com}`)"
+      traefik.http.routers.instatic.entrypoints: websecure
+      traefik.http.routers.instatic.tls: "true"
+      traefik.http.routers.instatic.tls.certResolver: letsencrypt
+      traefik.http.services.instatic.loadbalancer.server.port: "3001"
+      traefik.http.services.instatic.loadbalancer.healthcheck.path: "/health"
+
+networks:
+  traefik:
+    external: true
+    name: traefik_web

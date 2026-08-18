@@ -15,6 +15,8 @@ Instatic is one Bun server packaged by the root `Dockerfile`. The server reads r
 | Render SQLite template | Managed Docker install outside Railway | SQLite file | One Render disk mounted at `/app/storage` | [render.md](render.md) |
 | Render Postgres template | Managed Postgres install outside Railway | Render Postgres | Render disk for uploads, Render Postgres storage for DB | [render.md](render.md) |
 | VPS Docker Compose | Self-hosted server, full control | SQLite or bundled Postgres | Docker named volumes | [vps.md](vps.md) |
+| VPS behind Traefik | Existing Traefik proxy on a VPS | SQLite or bundled Postgres | App volumes (Traefik holds certs) | [traefik.md](traefik.md) |
+| GitHub Actions deploy | CD from GitHub to a Docker + Traefik server | SQLite or bundled Postgres | App volumes on the server | [github-actions-deploy.md](github-actions-deploy.md) |
 | Generic Docker host | Any platform that runs the Dockerfile/image | SQLite or external Postgres | A mounted directory/volume for DB/uploads | [docker-image.md](docker-image.md) |
 | VPS HTTPS | Public domain on a VPS | Unchanged | Caddy cert volume plus app volumes | [tls-caddy.md](tls-caddy.md) |
 
@@ -102,6 +104,8 @@ SQLite installs also need the SQLite database file on persistent storage. On pla
 | [vps.md](vps.md) | Docker Compose on a VPS, both SQLite and Postgres |
 | [docker-image.md](docker-image.md) | Generic Docker image contract and `docker run` examples |
 | [tls-caddy.md](tls-caddy.md) | Caddy TLS overlay for VPS Compose installs |
+| [traefik.md](traefik.md) | Traefik TLS overlay for VPS Compose installs |
+| [github-actions-deploy.md](github-actions-deploy.md) | GitHub Actions deploy workflow to a Docker + Traefik server |
 | [backup-restore.md](backup-restore.md) | Database and uploads backup/restore |
 | [release-workflow.md](release-workflow.md) | Maintainer image publishing workflow |
 

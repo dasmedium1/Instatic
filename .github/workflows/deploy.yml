@@ -1,0 +1,119 @@
+name: Deploy
+
+# Builds the image on the CI runner and streams it to the production server
+# (Docker + Traefik) over SSH — no container registry, no git on the server.
+# The server just holds the Compose files and a `.env`.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   SSH_KEY             — private deploy key (public key in ~/.ssh/authorized_keys)
+#   INSTATIC_SECRET_KEY — output of `bun run scripts/generate-secret-key.ts`
+# Required repository variables (Settings → Secrets and variables → Actions):
+#   SSH_HOST            — server hostname/IP
+#   SSH_USER            — SSH login user (needs docker permissions)
+#   DOMAIN              — public hostname (required)
+#   DEPLOY_DIR          — server directory holding the compose files (default: /opt/instatic)
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build & deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Optional: add `environment: production` here to require review approvals on
+    # deploy — create a "production" environment in the repo settings and move
+    # the secrets/variables into it.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify required variables
+        env:
+          DOMAIN: ${{ vars.DOMAIN }}
+        run: |
+          : "${DOMAIN:?DOMAIN variable is not set — add it under Settings → Secrets and variables → Actions → Variables}"
+
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg INSTATIC_VERSION="${GITHUB_SHA::7}" \
+            --build-arg INSTATIC_REVISION="${GITHUB_SHA}" \
+            --build-arg INSTATIC_CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t "instatic:sha-${GITHUB_SHA::7}" .
+
+      - name: Set up SSH key
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.SSH_KEY }}
+
+      - name: Transfer image to server
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+        run: |
+          docker save "instatic:sha-${GITHUB_SHA::7}" \
+            | gzip \
+            | ssh -o StrictHostKeyChecking=accept-new "${SSH_USER}@${SSH_HOST}" "gunzip -c | docker load"
+
+      - name: Prepare deploy directory
+        env:
+          INSTATIC_SECRET_KEY: ${{ secrets.INSTATIC_SECRET_KEY }}
+          DOMAIN: ${{ vars.DOMAIN }}
+        run: |
+          mkdir -p deploy
+          cp compose.prod.yml compose.sqlite.yml compose.traefik.yml deploy/
+          cat > deploy/.env <<EOF
+          INSTATIC_IMAGE=instatic:sha-${GITHUB_SHA::7}
+          INSTATIC_SECRET_KEY=${INSTATIC_SECRET_KEY}
+          DOMAIN=${DOMAIN}
+          EOF
+
+      - name: Sync files
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/instatic' }}
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new "${SSH_USER}@${SSH_HOST}" "mkdir -p ${DEPLOY_DIR}"
+          scp -o StrictHostKeyChecking=accept-new -r deploy/. "${SSH_USER}@${SSH_HOST}:${DEPLOY_DIR}/"
+
+      - name: Deploy
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/instatic' }}
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new "${SSH_USER}@${SSH_HOST}" bash -s <<EOF
+          set -euo pipefail
+          cd "${DEPLOY_DIR}"
+          docker compose -f compose.prod.yml -f compose.sqlite.yml -f compose.traefik.yml up -d --force-recreate
+          docker image prune -f
+          EOF
+
+      - name: Verify health
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          DOMAIN: ${{ vars.DOMAIN }}
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new "${SSH_USER}@${SSH_HOST}" bash -s <<EOF
+          set -uo pipefail
+          for i in \$(seq 1 30); do
+            code=\$(curl -s -o /dev/null -w '%{http_code}' "https://${DOMAIN}/health" || true)
+            [ "\$code" = "200" ] && { echo "healthy"; exit 0; }
+            sleep 5
+          done
+          echo "health check timed out" >&2
+          exit 1
+          EOF
