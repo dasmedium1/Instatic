@@ -101,6 +101,7 @@ SQLite installs also need the SQLite database file on persistent storage. On pla
 | [render.md](render.md) | Render Blueprint templates for SQLite and Postgres |
 | [vps.md](vps.md) | Docker Compose on a VPS, both SQLite and Postgres |
 | [docker-image.md](docker-image.md) | Generic Docker image contract and `docker run` examples |
+| [openship-deploy.sh](openship-deploy.sh) | OpenShip pull-and-run deployment script |
 | [tls-caddy.md](tls-caddy.md) | Caddy TLS overlay for VPS Compose installs |
 | [backup-restore.md](backup-restore.md) | Database and uploads backup/restore |
 | [release-workflow.md](release-workflow.md) | Maintainer image publishing workflow |
